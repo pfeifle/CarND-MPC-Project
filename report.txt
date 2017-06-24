@@ -1,0 +1,74 @@
+1) The Model  
+
+The state vector consists of 6 dimensions, i.e. [x,y,ψ,v,cte,eψ]
+It describes the position of the car its heading and speed and in addition two dimensios for the positional and heading error.
+The optimizer tries to minimize the error values w.r.t to a given trajectory.
+
+The actuators are [δ,a], i.e. steering and acceleration values.
+
+The update equations are used as described in Lesson 19 Section 9, i.e.
+  fg[1 + x_start + t] = x1 - (x0 + v0 * CppAD::cos(psi0) * dt);
+  fg[1 + y_start + t] = y1 - (y0 + v0 * CppAD::sin(psi0) * dt);
+  fg[1 + psi_start + t] = psi1 - (psi0 + v0 * delta0 / Lf * dt);
+  fg[1 + v_start + t] = v1 - (v0 + a0 * dt);
+  fg[1 + cte_start + t] =
+      cte1 - ((f0 - y0) + (v0 * CppAD::sin(epsi0) * dt));
+  fg[1 + epsi_start + i] =
+      epsi1 - ((psi0 - psides0) + v0 * delta0 / Lf * dt);
+
+
+
+2) Timestep Length and Elapsed Duration (N & dt)
+the values are set as suggested in the classroom and the video https://www.youtube.com/watch?v=bOQuhpz3YfU&feature=youtu.be&utm_medium=email&utm_campaign=2017-06-05_carnd_term2_annoucements&utm_source=blueshift&utm_content=2017-06-01_carnd_announcements&bsft_eid=5d3d51b3-1acc-41d3-9f6d-cadc1f93a952&bsft_clkid=c1b485da-da88-4143-bf8a-c6a74654e877&bsft_uid=93836ca6-af35-4cc9-81f1-75c283e456d0&bsft_mid=404b8069-36d0-4a29-b440-eec11eb75a52
+
+size_t N = 10;
+double dt = 0.1;
+
+the values were set in such a way to achieve a good trade-off between quality and performance. The product of N and dt is called the prediction horizon. The higher the value for N the better the quality but the poorer the performance. If we take dt too big, too much time elapses between two consecutive actuations. If the value of dt is too small for a given N the prediction horizon is not large enough.
+
+Several values were tried and N= 10 and dt =0.1 let to reasonable results. 
+
+3) Polynomial Fitting and MPC Preprocessing
+
+Basically, the desired trajectory was moved in such a way that it is mainly oriented along the x-axis. By doing this it is posible to fit a funtion (which requires one y-value for one x-value) through the given waypoints (cf. main.cpp).
+
+	    // shift car reference angle to 90 degrees
+            double shift_x = ptsx[i]-px;
+            double shift_y = ptsy[i]-py;
+
+            ptsx[i] = (shift_x * cos(0-psi) - shift_y*sin(0-psi));
+            ptsy[i] = (shift_x * sin(0-psi) + shift_y*cos(0-psi));
+          }
+
+
+4) Model Predictive Control with Latency
+two things were done to compensate the affect of latency.
+
+First, the position of the car reported by the simulator was projected into the future for the time of delay related to latency, i.e. 100ms (cf. main.cpp)
+
+      px = px + v*cos(psi)*0.1;
+	  py = py + v*sin(psi)*0.1;
+
+Second, the effect of the velocity in the error function was drastically reduced.
+By doing this we allow the car to slow down in front of the curves as the deviaton of the actual speed compared to the desired speed (100 mph) was not weighted very high.
+Deviatons from positions are much more taken into consideration (cf. mpc.cpp).
+
+
+    fg[0] = 0;
+    for (int i=0;i<N; i++)
+    {
+      fg[0] +=2000 *CppAD::pow(vars[cte_start + i] - ref_cte,2); // 2000
+      fg[0] +=2000 *CppAD::pow(vars[epsi_start + i] - ref_epsi,2); //2000
+      fg[0] +=0.1 * CppAD::pow(vars[v_start + i] - ref_v,2); //1
+    }
+    for (int i=0;i<N - 1; i++)
+    {
+      fg[0] +=5 *CppAD::pow(vars[delta_start + i] ,2); // 5
+      fg[0] +=5 *CppAD::pow(vars[a_start + i] ,2); //5
+    }
+    for (int i=0;i<N - 2; i++)
+    {
+      fg[0] +=200 *CppAD::pow(vars[delta_start + i+1] -vars[delta_start + i] ,2); // 200
+      fg[0] +=10 *CppAD::pow(vars[a_start + i+1] - vars[a_start + i] ,2); //10
+    }
+
